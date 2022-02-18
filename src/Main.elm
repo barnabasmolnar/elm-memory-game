@@ -1,27 +1,43 @@
 module Main exposing (..)
 
 import Browser
+import Debug exposing (toString)
 import Html exposing (Html, button, div, text)
+import Html.Attributes exposing (style)
 import Html.Events exposing (onClick)
 import List exposing (repeat)
+import Random exposing (generate)
+import Random.List exposing (shuffle)
+import Task
 
 
+main : Program () Model Msg
 main =
-    Browser.sandbox { init = init, update = update, view = view }
+    Browser.element
+        { init = init
+        , update = update
+        , subscriptions = subscriptions
+        , view = view
+        }
 
 
 type alias Model =
-    Int
+    GameState
 
 
-init : Model
-init =
-    0
+init : () -> ( Model, Cmd Msg )
+init _ =
+    ( { deck = initialDeck, selection = NoneFlipped }
+    , Task.perform identity (Task.succeed Shuffle)
+      -- , Task.perform (\_ -> Shuffle) (Task.succeed ())
+      -- , Task.perform (always Shuffle) (Task.succeed ())
+    )
 
 
 type Msg
-    = Increment
-    | Decrement
+    = Shuffle
+    | ShuffledDeck Deck
+    | CardFlipAttempt Position
 
 
 type CardType
@@ -40,8 +56,8 @@ type Card
     | FaceDown CardType
 
 
-type Deck
-    = List Card
+type alias Deck =
+    List Card
 
 
 type alias Position =
@@ -65,20 +81,80 @@ initialDeck =
     List.concatMap (repeat 2 << FaceDown) [ A, B, C, D, E, F, G, H ]
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Increment ->
-            model + 1
+        Shuffle ->
+            ( model, generate ShuffledDeck (shuffle initialDeck) )
 
-        Decrement ->
-            model - 1
+        ShuffledDeck d ->
+            ( { model | deck = d }, Cmd.none )
+
+        CardFlipAttempt pos ->
+            ( { model
+                | deck =
+                    List.indexedMap
+                        (\idx card ->
+                            if idx == pos then
+                                flipCard card
+
+                            else
+                                card
+                        )
+                        model.deck
+              }
+            , Cmd.none
+            )
+
+
+flipCard : Card -> Card
+flipCard card =
+    case card of
+        FaceDown t ->
+            FaceUp t
+
+        FaceUp t ->
+            FaceDown t
+
+
+
+-- SUBSCRIPTIONS
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.none
 
 
 view : Model -> Html Msg
 view model =
-    div []
-        [ button [ onClick Decrement ] [ text "-" ]
-        , div [] [ text (String.fromInt model) ]
-        , button [ onClick Increment ] [ text "+" ]
+    div [] [ viewDeck model.deck ]
+
+
+viewCard : Position -> Card -> Html Msg
+viewCard pos card =
+    div
+        [ style "border" "2px solid black"
+        , style "width" "40px"
+        , style "height" "60px"
+        , style "background-color" "grey"
+        , onClick (CardFlipAttempt pos)
         ]
+        [ case card of
+            FaceDown _ ->
+                text ""
+
+            FaceUp t ->
+                text (toString t)
+        ]
+
+
+viewDeck : Deck -> Html Msg
+viewDeck deck =
+    div
+        [ style "display" "grid"
+        , style "width" "max-content"
+        , style "grid-template-columns" "repeat(4, 1fr)"
+        , style "gap" "10px"
+        ]
+        (List.indexedMap viewCard deck)
