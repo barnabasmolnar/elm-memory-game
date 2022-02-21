@@ -1,13 +1,15 @@
 module Main exposing (..)
 
+import Array exposing (Array)
 import Browser
 import Debug exposing (toString)
-import Html exposing (Html, button, div, text)
+import Html exposing (Html, div, text)
 import Html.Attributes exposing (style)
 import Html.Events exposing (onClick)
 import List exposing (repeat)
+import Process exposing (sleep)
 import Random exposing (generate)
-import Random.List exposing (shuffle)
+import Random.Array exposing (shuffle)
 import Task
 
 
@@ -38,6 +40,7 @@ type Msg
     = Shuffle
     | ShuffledDeck Deck
     | CardFlipAttempt Position
+    | FlipCardsFaceDown
 
 
 type CardType
@@ -57,7 +60,7 @@ type Card
 
 
 type alias Deck =
-    List Card
+    Array Card
 
 
 type alias Position =
@@ -76,9 +79,10 @@ type alias GameState =
     }
 
 
-initialDeck : List Card
+initialDeck : Deck
 initialDeck =
     List.concatMap (repeat 2 << FaceDown) [ A, B, C, D, E, F, G, H ]
+        |> Array.fromList
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -91,30 +95,93 @@ update msg model =
             ( { model | deck = d }, Cmd.none )
 
         CardFlipAttempt pos ->
-            ( { model
-                | deck =
-                    List.indexedMap
-                        (\idx card ->
-                            if idx == pos then
-                                flipCard card
+            case modify pos flipCardFaceUp model.deck of
+                Just newDeck ->
+                    case model.selection of
+                        NoneFlipped ->
+                            ( { deck = newDeck, selection = OneFlipped pos }
+                            , Cmd.none
+                            )
+
+                        OneFlipped p ->
+                            if Array.get p newDeck == Array.get pos newDeck then
+                                ( { deck = newDeck, selection = NoneFlipped }
+                                , Cmd.none
+                                )
 
                             else
-                                card
-                        )
-                        model.deck
-              }
-            , Cmd.none
-            )
+                                ( { deck = newDeck
+                                  , selection = BothFlipped p pos
+                                  }
+                                , Task.perform
+                                    (always FlipCardsFaceDown)
+                                    (sleep 2000.0)
+                                )
+
+                        BothFlipped _ _ ->
+                            ( model, Cmd.none )
+
+                Nothing ->
+                    ( model, Cmd.none )
+
+        FlipCardsFaceDown ->
+            case model.selection of
+                NoneFlipped ->
+                    ( model, Cmd.none )
+
+                OneFlipped p ->
+                    case modify p flipCardFaceDown model.deck of
+                        Just newDeck ->
+                            ( { deck = newDeck
+                              , selection = NoneFlipped
+                              }
+                            , Cmd.none
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                BothFlipped p1 p2 ->
+                    case
+                        modify p1 flipCardFaceDown model.deck
+                            |> Maybe.andThen (modify p2 flipCardFaceDown)
+                    of
+                        Just newDeck ->
+                            ( { deck = newDeck
+                              , selection = NoneFlipped
+                              }
+                            , Cmd.none
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
 
 
-flipCard : Card -> Card
-flipCard card =
+flipCardFaceDown : Card -> Maybe Card
+flipCardFaceDown card =
     case card of
-        FaceDown t ->
-            FaceUp t
+        FaceDown _ ->
+            Nothing
 
         FaceUp t ->
-            FaceDown t
+            Just (FaceDown t)
+
+
+flipCardFaceUp : Card -> Maybe Card
+flipCardFaceUp card =
+    case card of
+        FaceDown t ->
+            Just (FaceUp t)
+
+        FaceUp _ ->
+            Nothing
+
+
+modify : Int -> (a -> Maybe a) -> Array a -> Maybe (Array a)
+modify idx fn xs =
+    Array.get idx xs
+        |> Maybe.andThen fn
+        |> Maybe.map (\v -> Array.set idx v xs)
 
 
 
@@ -157,4 +224,4 @@ viewDeck deck =
         , style "grid-template-columns" "repeat(4, 1fr)"
         , style "gap" "10px"
         ]
-        (List.indexedMap viewCard deck)
+        (List.indexedMap viewCard (Array.toList deck))
