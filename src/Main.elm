@@ -3,8 +3,8 @@ module Main exposing (..)
 import Array exposing (Array)
 import Browser
 import Debug exposing (toString)
-import Html exposing (Html, div, text)
-import Html.Attributes exposing (style)
+import Html exposing (Html, div, i, span, text)
+import Html.Attributes exposing (class, style)
 import Html.Events exposing (onClick)
 import List exposing (repeat)
 import Process exposing (sleep)
@@ -189,39 +189,94 @@ modify idx fn xs =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions model =
+subscriptions _ =
     Sub.none
 
 
 view : Model -> Html Msg
 view model =
-    div [] [ viewDeck model.deck ]
+    div [ class "flex justify-center my-12" ] [ viewDeck model.deck ]
 
 
 viewCard : Position -> Card -> Html Msg
 viewCard pos card =
     div
-        [ style "border" "2px solid black"
-        , style "width" "40px"
-        , style "height" "60px"
-        , style "background-color" "grey"
-        , onClick (CardFlipAttempt pos)
-        ]
-        [ case card of
-            FaceDown _ ->
-                text ""
-
-            FaceUp t ->
-                text (toString t)
+        [ class "w-24 h-36 bg-transparent [perspective:1000px]" ]
+        [ viewInnerCardContainer pos
+            card
+            [ viewCardFaceUp card
+            , viewCardFaceDown
+            ]
         ]
 
 
 viewDeck : Deck -> Html Msg
 viewDeck deck =
     div
-        [ style "display" "grid"
-        , style "width" "max-content"
-        , style "grid-template-columns" "repeat(4, 1fr)"
-        , style "gap" "10px"
-        ]
+        [ class "grid grid-cols-4 gap-3 w-max" ]
         (List.indexedMap viewCard (Array.toList deck))
+
+
+returnCardType : Card -> CardType
+returnCardType card =
+    case card of
+        FaceUp t ->
+            t
+
+        FaceDown t ->
+            t
+
+
+setInnerCardContainerAttrs : Position -> List (Html.Attribute Msg) -> List (Html.Attribute Msg)
+setInnerCardContainerAttrs pos attrs =
+    [ onClick (CardFlipAttempt pos)
+    , class "relative"
+    , class "w-full h-full"
+    , class "transition-transform duration-500"
+    , class "shadow-md"
+    , class "[transform-style:preserve-3d]"
+    ]
+        ++ attrs
+
+
+viewInnerCardContainer : Position -> Card -> List (Html Msg) -> Html Msg
+viewInnerCardContainer pos card faces =
+    let
+        attrs =
+            case card of
+                FaceUp _ ->
+                    setInnerCardContainerAttrs pos
+                        [ style "transform" "rotateY(180deg)" ]
+
+                FaceDown _ ->
+                    setInnerCardContainerAttrs pos []
+    in
+    div attrs faces
+
+
+viewCardFaceUp : Card -> Html msg
+viewCardFaceUp card =
+    div
+        [ class "absolute"
+        , class "w-full h-full"
+        , class "bg-slate-100"
+        , class "flex items-center justify-center"
+        , class "text-4xl font-bold text-slate-600"
+        , class "[backface-visibility:hidden]"
+        , class "[transform:rotateY(180deg)]"
+        ]
+        [ returnCardType card |> toString |> text ]
+
+
+viewCardFaceDown : Html msg
+viewCardFaceDown =
+    div
+        [ class "absolute"
+        , class "w-full h-full"
+        , class "bg-slate-300"
+        , class "flex items-center justify-center"
+        , class "[backface-visibility:hidden]"
+        ]
+        [ span [ class "text-4xl font-bold text-slate-400 block" ]
+            [ i [ class "fas fa-gem" ] [] ]
+        ]

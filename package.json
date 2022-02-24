@@ -3,14 +3,16 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "dev": "parcel src/index.html"
+    "dev": "parcel -p 3000 src/index.html"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@parcel/transformer-elm": "^2.3.1",
+    "autoprefixer": "^10.4.2",
     "elm": "^0.19.1-5",
-    "parcel": "^2.3.1"
+    "parcel": "^2.3.1",
+    "tailwindcss": "^3.0.23"
   }
 }
