@@ -3,7 +3,7 @@ module Main exposing (..)
 import Array exposing (Array)
 import Browser
 import Debug exposing (toString)
-import Html exposing (Html, div, i, span, text)
+import Html exposing (Html, button, div, i, span, text)
 import Html.Attributes exposing (class, style)
 import Html.Events exposing (onClick)
 import List exposing (repeat)
@@ -13,7 +13,7 @@ import Random.Array exposing (shuffle)
 import Task
 
 
-main : Program () Model Msg
+main : Program Env Model Msg
 main =
     Browser.element
         { init = init
@@ -24,12 +24,20 @@ main =
 
 
 type alias Model =
-    GameState
+    { deck : Deck
+    , selection : Selection
+    , steps : Int
+    , env : Env
+    }
 
 
-init : () -> ( Model, Cmd Msg )
-init _ =
-    ( { deck = initialDeck, selection = NoneFlipped }
+type alias Env =
+    { isDev : Bool }
+
+
+init : Env -> ( Model, Cmd Msg )
+init env =
+    ( { env = env, deck = initialDeck, selection = NoneFlipped, steps = 0 }
     , Task.perform identity (Task.succeed Shuffle)
       -- , Task.perform (\_ -> Shuffle) (Task.succeed ())
       -- , Task.perform (always Shuffle) (Task.succeed ())
@@ -37,10 +45,12 @@ init _ =
 
 
 type Msg
-    = Shuffle
+    = NewGame
+    | Shuffle
     | ShuffledDeck Deck
     | CardFlipAttempt Position
     | FlipCardsFaceDown
+    | DEBUG_FlipCardsFaceUp
 
 
 type CardType
@@ -73,21 +83,47 @@ type Selection
     | BothFlipped Position Position
 
 
-type alias GameState =
-    { deck : Deck
-    , selection : Selection
-    }
-
-
 initialDeck : Deck
 initialDeck =
     List.concatMap (repeat 2 << FaceDown) [ A, B, C, D, E, F, G, H ]
         |> Array.fromList
 
 
+debugFlipUp : Card -> Card
+debugFlipUp c =
+    case c of
+        FaceUp t ->
+            FaceUp t
+
+        FaceDown t ->
+            FaceUp t
+
+
+flipDown : Card -> Card
+flipDown c =
+    case c of
+        FaceUp t ->
+            FaceDown t
+
+        FaceDown t ->
+            FaceDown t
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        DEBUG_FlipCardsFaceUp ->
+            ( { model | deck = Array.map debugFlipUp model.deck }, Cmd.none )
+
+        NewGame ->
+            ( { model
+                | deck = Array.map flipDown model.deck
+                , selection = NoneFlipped
+                , steps = 0
+              }
+            , Task.perform (always Shuffle) (sleep 750.0)
+            )
+
         Shuffle ->
             ( model, generate ShuffledDeck (shuffle initialDeck) )
 
@@ -99,19 +135,29 @@ update msg model =
                 Just newDeck ->
                     case model.selection of
                         NoneFlipped ->
-                            ( { deck = newDeck, selection = OneFlipped pos }
+                            ( { model
+                                | deck = newDeck
+                                , selection = OneFlipped pos
+                                , steps = model.steps + 1
+                              }
                             , Cmd.none
                             )
 
                         OneFlipped p ->
                             if Array.get p newDeck == Array.get pos newDeck then
-                                ( { deck = newDeck, selection = NoneFlipped }
+                                ( { model
+                                    | deck = newDeck
+                                    , selection = NoneFlipped
+                                    , steps = model.steps + 1
+                                  }
                                 , Cmd.none
                                 )
 
                             else
-                                ( { deck = newDeck
-                                  , selection = BothFlipped p pos
+                                ( { model
+                                    | deck = newDeck
+                                    , selection = BothFlipped p pos
+                                    , steps = model.steps + 1
                                   }
                                 , Task.perform
                                     (always FlipCardsFaceDown)
@@ -132,8 +178,9 @@ update msg model =
                 OneFlipped p ->
                     case modify p flipCardFaceDown model.deck of
                         Just newDeck ->
-                            ( { deck = newDeck
-                              , selection = NoneFlipped
+                            ( { model
+                                | deck = newDeck
+                                , selection = NoneFlipped
                               }
                             , Cmd.none
                             )
@@ -147,8 +194,9 @@ update msg model =
                             |> Maybe.andThen (modify p2 flipCardFaceDown)
                     of
                         Just newDeck ->
-                            ( { deck = newDeck
-                              , selection = NoneFlipped
+                            ( { model
+                                | deck = newDeck
+                                , selection = NoneFlipped
                               }
                             , Cmd.none
                             )
@@ -193,9 +241,58 @@ subscriptions _ =
     Sub.none
 
 
+htmlIf : Html msg -> Bool -> Html msg
+htmlIf el cond =
+    if cond then
+        el
+
+    else
+        text ""
+
+
 view : Model -> Html Msg
 view model =
-    div [ class "flex justify-center my-12" ] [ viewDeck model.deck ]
+    div []
+        [ div [] [ text ("Steps:" ++ (model.steps |> toString)) ]
+        , htmlIf (button [ onClick DEBUG_FlipCardsFaceUp ] [ text "Win it!" ])
+            model.env.isDev
+        , htmlIf viewVictory (allFaceUp model.deck)
+        , div [ class "flex justify-center my-12" ] [ viewDeck model.deck ]
+        ]
+
+
+allFaceUp : Deck -> Bool
+allFaceUp d =
+    let
+        isCardFaceUp c =
+            case c of
+                FaceUp _ ->
+                    True
+
+                FaceDown _ ->
+                    False
+    in
+    List.all isCardFaceUp (Array.toList d)
+
+
+viewVictory : Html Msg
+viewVictory =
+    div [ class "fixed z-10 inset-0 overflow-y-auto" ]
+        [ div [ class "flex mt-28 items-start justify-center min-h-screen" ]
+            [ div [ class "fixed inset-0 bg-black opacity-30" ] []
+            , div [ class "relative bg-white rounded max-w-sm mx-auto" ]
+                [ div
+                    [ class "p-8 font-bold text-2xl text-center space-y-8" ]
+                    [ div [] [ text "Congrats, you won!" ]
+                    , button
+                        [ onClick NewGame
+                        , class "inline-flex items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                        ]
+                        [ text "New game" ]
+                    ]
+                ]
+            ]
+        ]
 
 
 viewCard : Position -> Card -> Html Msg
