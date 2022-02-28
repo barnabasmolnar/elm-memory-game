@@ -64,9 +64,13 @@ type CardType
     | H
 
 
-type Card
-    = FaceUp CardType
-    | FaceDown CardType
+type CardFace
+    = FaceUp
+    | FaceDown
+
+
+type alias Card =
+    { face : CardFace, cardType : CardType }
 
 
 type alias Deck =
@@ -85,28 +89,19 @@ type Selection
 
 initialDeck : Deck
 initialDeck =
-    List.concatMap (repeat 2 << FaceDown) [ A, B, C, D, E, F, G, H ]
+    List.concatMap (\t -> repeat 2 { face = FaceDown, cardType = t })
+        [ A, B, C, D, E, F, G, H ]
         |> Array.fromList
 
 
 debugFlipUp : Card -> Card
 debugFlipUp c =
-    case c of
-        FaceUp t ->
-            FaceUp t
-
-        FaceDown t ->
-            FaceUp t
+    { c | face = FaceUp }
 
 
 flipDown : Card -> Card
 flipDown c =
-    case c of
-        FaceUp t ->
-            FaceDown t
-
-        FaceDown t ->
-            FaceDown t
+    { c | face = FaceDown }
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -131,44 +126,50 @@ update msg model =
             ( { model | deck = d }, Cmd.none )
 
         CardFlipAttempt pos ->
-            case modify pos flipCardFaceUp model.deck of
-                Just newDeck ->
-                    case model.selection of
-                        NoneFlipped ->
+            if
+                (Array.get pos model.deck |> Maybe.map .face)
+                    == Just FaceDown
+            then
+                let
+                    newDeck =
+                        modify pos FaceUp model.deck
+                in
+                case model.selection of
+                    NoneFlipped ->
+                        ( { model
+                            | deck = newDeck
+                            , selection = OneFlipped pos
+                            , steps = model.steps + 1
+                          }
+                        , Cmd.none
+                        )
+
+                    OneFlipped p ->
+                        if Array.get p newDeck == Array.get pos newDeck then
                             ( { model
                                 | deck = newDeck
-                                , selection = OneFlipped pos
+                                , selection = NoneFlipped
                                 , steps = model.steps + 1
                               }
                             , Cmd.none
                             )
 
-                        OneFlipped p ->
-                            if Array.get p newDeck == Array.get pos newDeck then
-                                ( { model
-                                    | deck = newDeck
-                                    , selection = NoneFlipped
-                                    , steps = model.steps + 1
-                                  }
-                                , Cmd.none
-                                )
+                        else
+                            ( { model
+                                | deck = newDeck
+                                , selection = BothFlipped p pos
+                                , steps = model.steps + 1
+                              }
+                            , Task.perform
+                                (always FlipCardsFaceDown)
+                                (sleep 2000.0)
+                            )
 
-                            else
-                                ( { model
-                                    | deck = newDeck
-                                    , selection = BothFlipped p pos
-                                    , steps = model.steps + 1
-                                  }
-                                , Task.perform
-                                    (always FlipCardsFaceDown)
-                                    (sleep 2000.0)
-                                )
+                    BothFlipped _ _ ->
+                        ( model, Cmd.none )
 
-                        BothFlipped _ _ ->
-                            ( model, Cmd.none )
-
-                Nothing ->
-                    ( model, Cmd.none )
+            else
+                ( model, Cmd.none )
 
         FlipCardsFaceDown ->
             case model.selection of
@@ -176,60 +177,29 @@ update msg model =
                     ( model, Cmd.none )
 
                 OneFlipped p ->
-                    case modify p flipCardFaceDown model.deck of
-                        Just newDeck ->
-                            ( { model
-                                | deck = newDeck
-                                , selection = NoneFlipped
-                              }
-                            , Cmd.none
-                            )
-
-                        Nothing ->
-                            ( model, Cmd.none )
+                    ( { model
+                        | deck = modify p FaceDown model.deck
+                        , selection = NoneFlipped
+                      }
+                    , Cmd.none
+                    )
 
                 BothFlipped p1 p2 ->
-                    case
-                        modify p1 flipCardFaceDown model.deck
-                            |> Maybe.andThen (modify p2 flipCardFaceDown)
-                    of
-                        Just newDeck ->
-                            ( { model
-                                | deck = newDeck
-                                , selection = NoneFlipped
-                              }
-                            , Cmd.none
-                            )
-
-                        Nothing ->
-                            ( model, Cmd.none )
+                    ( { model
+                        | deck =
+                            modify p1 FaceDown model.deck
+                                |> modify p2 FaceDown
+                        , selection = NoneFlipped
+                      }
+                    , Cmd.none
+                    )
 
 
-flipCardFaceDown : Card -> Maybe Card
-flipCardFaceDown card =
-    case card of
-        FaceDown _ ->
-            Nothing
-
-        FaceUp t ->
-            Just (FaceDown t)
-
-
-flipCardFaceUp : Card -> Maybe Card
-flipCardFaceUp card =
-    case card of
-        FaceDown t ->
-            Just (FaceUp t)
-
-        FaceUp _ ->
-            Nothing
-
-
-modify : Int -> (a -> Maybe a) -> Array a -> Maybe (Array a)
-modify idx fn xs =
-    Array.get idx xs
-        |> Maybe.andThen fn
-        |> Maybe.map (\v -> Array.set idx v xs)
+modify : Position -> CardFace -> Deck -> Deck
+modify pos face deck =
+    Array.get pos deck
+        |> Maybe.map (\card -> Array.set pos { card | face = face } deck)
+        |> Maybe.withDefault deck
 
 
 
@@ -263,16 +233,7 @@ view model =
 
 allFaceUp : Deck -> Bool
 allFaceUp d =
-    let
-        isCardFaceUp c =
-            case c of
-                FaceUp _ ->
-                    True
-
-                FaceDown _ ->
-                    False
-    in
-    List.all isCardFaceUp (Array.toList d)
+    List.all (\c -> c.face == FaceUp) (Array.toList d)
 
 
 viewVictory : Html Msg
@@ -314,16 +275,6 @@ viewDeck deck =
         (List.indexedMap viewCard (Array.toList deck))
 
 
-returnCardType : Card -> CardType
-returnCardType card =
-    case card of
-        FaceUp t ->
-            t
-
-        FaceDown t ->
-            t
-
-
 setInnerCardContainerAttrs : Position -> List (Html.Attribute Msg) -> List (Html.Attribute Msg)
 setInnerCardContainerAttrs pos attrs =
     [ onClick (CardFlipAttempt pos)
@@ -340,12 +291,12 @@ viewInnerCardContainer : Position -> Card -> List (Html Msg) -> Html Msg
 viewInnerCardContainer pos card faces =
     let
         attrs =
-            case card of
-                FaceUp _ ->
+            case card.face of
+                FaceUp ->
                     setInnerCardContainerAttrs pos
                         [ style "transform" "rotateY(180deg)" ]
 
-                FaceDown _ ->
+                FaceDown ->
                     setInnerCardContainerAttrs pos []
     in
     div attrs faces
@@ -362,7 +313,7 @@ viewCardFaceUp card =
         , class "[backface-visibility:hidden]"
         , class "[transform:rotateY(180deg)]"
         ]
-        [ returnCardType card |> toString |> text ]
+        [ card.cardType |> toString |> text ]
 
 
 viewCardFaceDown : Html msg
